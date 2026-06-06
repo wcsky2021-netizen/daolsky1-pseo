@@ -112,6 +112,10 @@ def generate_post(region: str, board_title: str, longtail: str, model_name: str 
             for k in ("title", "meta_description", "body_md"):
                 if data.get(k):
                     data[k] = leafify(data[k], region)
+            # 메타설명 정리: "…까지- 경동" 같은 어색한 하이픈 구분자 → 마침표.
+            # (범위표기 "1톤-5톤"은 하이픈 뒤 공백이 없어 보존됨)
+            if data.get("meta_description"):
+                data["meta_description"] = _clean_desc(data["meta_description"])
             return data
         except Exception as e:
             print(f"[attempt {attempt+1}/3] FAIL: {type(e).__name__}: {e}", flush=True)
@@ -172,6 +176,23 @@ def _parse_json_lenient(text: str) -> dict[str, Any]:
     if out:
         return out
     raise json.JSONDecodeError("all parse strategies failed", text, 0)
+
+
+def _clean_desc(s: str) -> str:
+    """메타설명의 어색한 하이픈 구분자 정리. 검색결과 노출문구라 타이틀만큼 중요.
+
+    - "…마무리까지- 경동 …"  → "…마무리까지. 경동 …"  (한글+하이픈+공백 → 마침표)
+    - 범위표기 "1톤-5톤"      → 보존 (하이픈 뒤 공백 없음)
+    """
+    import re
+    s = s.strip()
+    # 한글/숫자 뒤, 공백+하이픈(–—-)+공백 또는 하이픈+공백 → 마침표
+    s = re.sub(r'(?<=[가-힣0-9])\s*[-–—]\s+', '. ', s)
+    s = re.sub(r'\s*[·•]\s*', ' ', s)          # 가운뎃점도 공백으로
+    s = re.sub(r'\.{2,}', '.', s)               # 중복 마침표
+    s = re.sub(r'\s{2,}', ' ', s).strip()
+    s = re.sub(r'\s+([.,])', r'\1', s)          # 구두점 앞 공백 제거
+    return s
 
 
 def _clean_json_text(text: str) -> str:
