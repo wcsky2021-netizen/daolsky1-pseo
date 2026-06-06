@@ -2,6 +2,7 @@ import { html, raw } from 'hono/html';
 import type { Site, Board, Post } from '../types';
 import { Layout } from './layout';
 import { Thumbnail } from './thumbnail';
+import { slugImageId } from '../lib/body-photos';
 import type { ThumbnailText } from '../lib/thumbnail-text';
 
 export interface RenderedSection {
@@ -117,10 +118,9 @@ export function PostPage(props: PostPageProps) {
           ${raw(s.bodyHtml)}
           ${i === faqHostIdx ? faqItems : ''}
           ${[1, 3, 5].includes(i) ? Thumbnail({
-            // 본문 3장 모두 브랜디드 — 같은 디자인/텍스트, 배경 사진만 변형 (body1/body2/body3).
-            // R2 키: og/s{site_id}/body{N}-{slug}.jpg (사이트별). 미생성분은 /media 가
-            // 옛 공유 키(og/body{N}-{slug}.jpg)로 폴백하므로 재합성 전에도 404 안 남.
-            imageUrl: `/media/og/s${site.id}/body${(i + 1) / 2}-${post.slug}.jpg`,
+            // 본문 3장 모두 텍스트 baked 입간판 (compose_local.py 합성, jsDelivr 서빙).
+            // 경로: /media/og/{slugImageId}/b{N}.jpg. '/og/' 포함이라 Thumbnail 이 plain img 로 렌더.
+            imageUrl: `/media/og/${slugImageId(post.slug)}/b${(i + 1) / 2}.jpg`,
             ribbon: thumbnailText.ribbon,
             headlinePrefix: thumbnailText.headlinePrefix,
             headlineHighlight: thumbnailText.headlineHighlight,

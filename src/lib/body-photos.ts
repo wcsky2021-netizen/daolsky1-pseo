@@ -9,6 +9,12 @@ function hash(s: string): number {
   return h;
 }
 
+// 글 slug → 합성 이미지 폴더 id. content-pipeline/compose_local.py _djb2(ord) 와 동일.
+// 합성본 경로: /media/og/{slugImageId}/h.jpg, b1.jpg, b2.jpg, b3.jpg
+export function slugImageId(slug: string): number {
+  return hash(slug);
+}
+
 export function pickBodyPhotos(slug: string, region: string, boardTitle: string): { url: string; caption: string }[] {
   const captions = [
     `${region} 현장 작업 모습`,
