@@ -113,6 +113,50 @@ const faviconResponse = () => new Response(FAVICON_PNG, {
 app.get('/favicon.ico', () => faviconResponse());
 app.get('/favicon.png', () => faviconResponse());
 
+// 홈·보드 등 글이 아닌 페이지의 OG 폴백 이미지.
+// 정적 og-default.jpg 파일이 없어 과거 404 였음. 발행된 글의 이미 만들어진 OG
+// (/media/og/…) 중 하나를 랜덤으로 골라 같은 도메인 200 으로 서빙한다.
+// media 라우트와 동일하게 R2 우선, 미설정 시 GitHub(jsDelivr) 프록시.
+app.get('/og-default.jpg', async (c) => {
+  const site = c.get('site');
+  const row = await c.env.DB.prepare(
+    `SELECT og_image_url FROM posts
+     WHERE site_id = ? AND status = 'published'
+       AND og_image_url IS NOT NULL AND og_image_url LIKE '/media/og/%'
+     ORDER BY RANDOM() LIMIT 1`
+  ).bind(site.id).first<{ og_image_url: string }>();
+
+  // 리포에 확실히 커밋돼 있는 OG (글이 없거나, 고른 글 이미지가 리포에 없을 때의 안전 폴백).
+  const SAFE_KEY = 'og/2980359132/h.jpg';
+  const chosen = (row?.og_image_url ?? `/media/${SAFE_KEY}`).replace(/^\/media\//, '');
+
+  const serve = async (key: string): Promise<Response | null> => {
+    if (c.env.MEDIA) {
+      const obj = await c.env.MEDIA.get(key);
+      if (obj) {
+        const headers = new Headers();
+        obj.writeHttpMetadata(headers);
+        headers.set('content-type', 'image/jpeg');
+        headers.set('cache-control', 'public, max-age=3600');
+        return new Response(obj.body, { headers });
+      }
+      return null;
+    }
+    const cdnUrl = `https://cdn.jsdelivr.net/gh/wcsky2021-netizen/daolsky1-pseo@main/${key}`;
+    const upstream = await fetch(cdnUrl, {
+      cf: { cacheEverything: true, cacheTtl: 2592000 },
+    } as RequestInit);
+    if (!upstream.ok) return null;
+    const headers = new Headers();
+    headers.set('content-type', upstream.headers.get('content-type') ?? 'image/jpeg');
+    headers.set('cache-control', 'public, max-age=3600');
+    return new Response(upstream.body, { headers });
+  };
+
+  // 고른 글 이미지가 리포에 없으면(jsDelivr 404) 안전 폴백으로 재시도 → 항상 200.
+  return (await serve(chosen)) ?? (await serve(SAFE_KEY)) ?? c.text('Not found', 404);
+});
+
 // 홈
 app.get('/', async (c) => {
   const site = c.get('site');
