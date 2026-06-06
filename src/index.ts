@@ -78,12 +78,19 @@ app.get('/rss.xml', async (c) => {
 // R2 미디어 서빙 (커스텀 도메인 붙기 전까지 Worker 경유)
 app.get('/media/:key{.+}', async (c) => {
   const key = c.req.param('key');
-  // R2 미설정 시 GitHub(jsDelivr) CDN으로 폴백 — raw 사진 photos/NNN.jpg 서빙.
+  // R2 미설정 시 GitHub(jsDelivr) CDN에서 받아 **같은 도메인 200**으로 프록시.
+  // (리다이렉트 X — 네이버/구글 이미지 봇이 og:image 를 확실히 긁도록.)
   // R2 활성화 후 binding 붙이면 자동으로 R2 우선.
   if (!c.env.MEDIA) {
-    return Response.redirect(
-      `https://cdn.jsdelivr.net/gh/wcsky2021-netizen/daolsky1-pseo@main/${key}`, 302
-    );
+    const cdnUrl = `https://cdn.jsdelivr.net/gh/wcsky2021-netizen/daolsky1-pseo@main/${key}`;
+    const upstream = await fetch(cdnUrl, {
+      cf: { cacheEverything: true, cacheTtl: 2592000 },
+    } as RequestInit);
+    if (!upstream.ok) return c.text('Not found', 404);
+    const headers = new Headers();
+    headers.set('content-type', upstream.headers.get('content-type') ?? 'image/jpeg');
+    headers.set('cache-control', 'public, max-age=2592000, immutable');
+    return new Response(upstream.body, { headers });
   }
   let obj = await c.env.MEDIA.get(key);
   if (!obj) {
