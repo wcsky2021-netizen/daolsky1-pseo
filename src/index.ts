@@ -78,6 +78,13 @@ app.get('/rss.xml', async (c) => {
 // R2 미디어 서빙 (커스텀 도메인 붙기 전까지 Worker 경유)
 app.get('/media/:key{.+}', async (c) => {
   const key = c.req.param('key');
+  // R2 미설정 시 GitHub(jsDelivr) CDN으로 폴백 — raw 사진 photos/NNN.jpg 서빙.
+  // R2 활성화 후 binding 붙이면 자동으로 R2 우선.
+  if (!c.env.MEDIA) {
+    return Response.redirect(
+      `https://cdn.jsdelivr.net/gh/wcsky2021-netizen/daolsky1-pseo@main/${key}`, 302
+    );
+  }
   let obj = await c.env.MEDIA.get(key);
   if (!obj) {
     // 사이트 네임스페이스(og/sN/…) 미재합성분은 옛 공유 키(og/…)로 폴백 → 마이그레이션 중 404 방지.
