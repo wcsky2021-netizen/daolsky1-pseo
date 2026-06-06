@@ -6,7 +6,7 @@
 --   UPDATE sites SET naver_verification='<코드>' WHERE domain='daolsky1.co.kr';
 
 INSERT OR IGNORE INTO sites (id, domain, site_name, phone) VALUES
-  (1, 'daolsky1.co.kr', '다올스카이차', 'TODO_형님_대표번호');
+  (1, 'daolsky1.co.kr', '다올스카이차', '010-2445-1554');
 
 INSERT OR IGNORE INTO boards (site_id, slug, title, display_order) VALUES
   (1, '스카이차',         '스카이차',         1),
