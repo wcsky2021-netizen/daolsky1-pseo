@@ -121,9 +121,15 @@ def build_og(slug: str, region: str, board_title: str) -> str:
     photo_key = pick_photo_key(slug)
     fallback_url = f"/media/{photo_key}"   # Worker가 R2에서 직접 서빙 — R2 키 불필요
 
-    # R2 키 없거나 쓰기 권한 없으면 합성 스킵 — fallback URL로 충분
+    # R2 미사용(카드 없음) → 로컬 합성: 텍스트 baked 입간판 4장(h/b1/b2/b3)을
+    # og/{id}/ 에 생성. GitHub Action 이 commit·push → jsDelivr 서빙.
     if not os.environ.get("R2_ACCESS_KEY_ID"):
-        return fallback_url
+        try:
+            from compose_local import compose_post_images
+            return compose_post_images(slug, region, board_title)
+        except Exception as e:
+            print(f"[warn] local compose failed: {e}", file=sys.stderr)
+            return fallback_url
 
     # 소스 사진 읽기 — R2 boto3 GetObject가 AccessDenied 나면 HTTPS public 으로 폴백.
     # (R2 API 토큰이 write-only 일 때 read는 어차피 막힘. Worker /media/* 가 public.)

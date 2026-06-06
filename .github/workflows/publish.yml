@@ -48,7 +48,7 @@ on:
         default: "2"
 
 permissions:
-  contents: read
+  contents: write   # 합성 입간판 이미지(og/) 를 저장소에 commit·push
 
 concurrency:
   group: publish
@@ -88,3 +88,16 @@ jobs:
           PUBLISH_PROBABILITY:   ${{ inputs.force_run == 'true' && '1.0' || '1.0' }}
           PUBLISH_BATCH_SIZE:    ${{ inputs.batch_size || '2' }}
         run: python content-pipeline/run_once.py
+
+      - name: Commit composed 입간판 images (og/)
+        run: |
+          git config user.name "daolsky1-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add og/
+          if git diff --staged --quiet; then
+            echo "no new images"
+          else
+            git commit -m "ci: 입간판 합성 이미지 $(date -u +%Y%m%dT%H%MZ)"
+            git pull --rebase --autostash origin main || true
+            git push
+          fi

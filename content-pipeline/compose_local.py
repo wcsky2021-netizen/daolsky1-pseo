@@ -57,8 +57,14 @@ def _pick_body_photos(slug: str, hero_n: int, count: int = 3):
 
 
 def compose_post_images(slug: str, region: str, board_title: str,
-                        photos_dir: str, repo_root: str) -> str:
-    """4장 합성 후 repo_root/og/{id}/ 에 저장. 히어로 /media URL 반환."""
+                        photos_dir: str | None = None, repo_root: str | None = None) -> str:
+    """4장 합성 후 repo_root/og/{id}/ 에 저장. 히어로 /media URL 반환.
+
+    photos_dir/repo_root 미지정 시 저장소 구조(../photos, ..)에서 자동 추론.
+    """
+    root = Path(repo_root) if repo_root else Path(__file__).resolve().parents[1]
+    photos_dir = photos_dir or str(root / "photos")
+    repo_root = str(root)
     img_id = _djb2(slug)
     ribbon, head_main = _split_board(board_title)
     prefix = region_leaf(region)

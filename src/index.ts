@@ -197,8 +197,12 @@ app.get('/:boardSlug/:postSlug', async (c) => {
 
   // 엣지 캐시: 글 페이지는 거의 안 바뀌므로 Cache API 로 1시간 캐시.
   // (홈·보드는 새 글 즉시 반영 위해 캐시 안 함.) Host 가 URL에 포함돼 도메인별 분리됨.
+  // CACHE_VERSION: 템플릿/이미지 경로 변경 시 올리면 기존 캐시 일괄 무효화.
+  const CACHE_VERSION = '3';
   const cache = caches.default;
-  const cacheKey = new Request(c.req.url, { method: 'GET' });
+  const _ck = new URL(c.req.url);
+  _ck.searchParams.set('__cv', CACHE_VERSION);
+  const cacheKey = new Request(_ck.toString(), { method: 'GET' });
   const cached = await cache.match(cacheKey);
   if (cached) return cached;
 
