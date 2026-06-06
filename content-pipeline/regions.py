@@ -78,29 +78,26 @@ def _disambiguate(label: str) -> str:
 def all_region_targets():
     """발행 대상 지역. (region_label, region_type) 리스트.
 
-    서비스 권역 (2026-06 확장 — 충청권 전역 추가):
-      서울·경기·인천 전역 + 대전·세종 + 충북·충남 전역.
-      (경기 작업권 제한은 네이버 블로그 키워드 자료용이지 이 사이트 발행과 무관.)
+    서비스 권역 (다올스카이차 정책): 전국 발행, 제주만 제외.
+      광역·시군구 17개 시도 전부(제주 제외) + 법정동(데이터 있는 시도만).
 
     3단계 레벨 모두 포함:
-      광역    (서울, 경기, 인천, 대전, 세종, 충북, 충남)
-      시군구  (서울 강남구, 충북 제천시 ...)
-      법정동  (서울 강남구 청담동 ...)  ← region_dongs.py 추출분.
-              동단위: 대전·충남 전역 OK. 충북은 청주·충주만, 세종은 동데이터 없음
-              → 나머지는 시·군 단위 키워드만 (PDF 재추출 시 채워짐).
+      광역    (서울·부산·…·경남, 제주 제외)
+      시군구  (서울 강남구, 부산 해운대구 ...)
+      법정동  (서울 강남구 청담동 ...)  ← region_dongs.py 추출분 (있는 시도만).
     """
-    INCLUDE_FULL_REGIONS = {"서울", "경기", "인천", "대전", "세종", "충북", "충남"}
+    EXCLUDE_REGIONS = {"제주"}  # 전국 발행, 제주만 제외
 
     out = []
 
     # 1) 광역
     for r in REGIONS_BY_LEVEL["광역"]:
-        if r in INCLUDE_FULL_REGIONS:
+        if r not in EXCLUDE_REGIONS:
             out.append((r, "광역"))
 
     # 2) 시군구
     for parent, children in REGIONS_BY_LEVEL["시군구"].items():
-        if parent in INCLUDE_FULL_REGIONS:
+        if parent not in EXCLUDE_REGIONS:
             for c in children:
                 out.append((f"{parent} {c}", "시군구"))
 
@@ -110,7 +107,7 @@ def all_region_targets():
         from region_dongs import REGION_DONGS
         from dong_normalize import normalize_city_dongs
         for parent_label, cities in REGION_DONGS.items():
-            if parent_label in INCLUDE_FULL_REGIONS:
+            if parent_label not in EXCLUDE_REGIONS:
                 for city, dongs in cities.items():
                     for dong in normalize_city_dongs(dongs):
                         out.append((f"{parent_label} {city} {dong}", "법정동"))
