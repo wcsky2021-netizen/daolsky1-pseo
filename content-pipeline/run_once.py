@@ -1,0 +1,367 @@
+"""하루치 1건 발행 사이클.
+
+흐름:
+  1. (region, board, longtail) 랜덤 선택
+  2. Gemini로 9-섹션 글 생성
+  3. Worker /api/posts 로 POST
+  4. 결과 출력
+
+GitHub Actions가 이걸 cron으로 매일 호출.
+"""
+from __future__ import annotations
+
+import json
+import os
+import random
+import sys
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+
+from generate import generate_post
+from image_pool import pick_photo_key
+from keyword_variants import derive_keywords, region_leaf
+from longtails import get_longtails, LONGTAILS_BY_BOARD
+from og_compose import compose_for_site
+from publish import publish, slugify_ko
+from r2_client import get_object, put_object
+from regions import all_region_targets
+
+import requests as _requests
+
+
+def _split_board(board_title: str) -> tuple[str, str]:
+    """보드 → (ribbon, headline_main). thumbnail-text.ts BOARD_THUMBNAIL_MAP 과 동일."""
+    BOARD_MAP = {
+        "스카이차":      ("스카이차", "스카이차"),
+        "스카이차 일대":  ("일대",    "스카이차"),
+        "스카이 작업차":  ("작업차",  "스카이차"),
+        "스카이차 요금":  ("요금",    "스카이차"),
+        "스카이차 비용":  ("비용",    "스카이차"),
+        "스카이차 가격":  ("가격",    "스카이차"),
+        "스카이차 이용료": ("이용료",  "스카이차"),
+        "고소작업차량":   ("차량",    "고소작업"),
+    }
+    return BOARD_MAP.get(board_title, (board_title, board_title))
+
+
+SITE_DOMAIN = os.environ.get("SITE_DOMAIN", "ajasky.co.kr")
+
+# 8개 보드 (slug, title) — DB seed.sql 와 동기 유지
+BOARDS = [
+    ("스카이차",         "스카이차"),
+    ("스카이차-일대",     "스카이차 일대"),
+    ("스카이-작업차",     "스카이 작업차"),
+    ("스카이차-요금",     "스카이차 요금"),
+    ("스카이차-비용",     "스카이차 비용"),
+    ("스카이차-가격",     "스카이차 가격"),
+    ("스카이차-이용료",   "스카이차 이용료"),
+    ("고소작업차량",      "고소작업차량"),
+]
+
+
+_REGION_COUNTS = None
+
+
+def _fetch_region_counts() -> dict:
+    """Worker 에서 사이트별 지역(region)당 글 수 조회.
+
+    실패 시 {} 반환 → 모든 지역 동률(0)로 취급돼 자연스럽게 순수 랜덤으로 degrade.
+    """
+    base = os.environ.get("WORKER_API", "https://ajasky.co.kr/api/posts").rsplit("/", 1)[0]
+    token = os.environ.get("WORKER_API_TOKEN")
+    try:
+        r = _requests.get(
+            f"{base}/region-counts",
+            params={"site_domain": SITE_DOMAIN},
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=15,
+        )
+        r.raise_for_status()
+        return r.json().get("counts", {}) or {}
+    except Exception as e:
+        print(f"[warn] region-counts 조회 실패 ({e}) → 균등 랜덤으로 진행", file=sys.stderr)
+        return {}
+
+
+def _region_counts() -> dict:
+    """프로세스 1회 캐시 (한 cron run 동안 재사용; 발행 성공 시 로컬 증가)."""
+    global _REGION_COUNTS
+    if _REGION_COUNTS is None:
+        _REGION_COUNTS = _fetch_region_counts()
+    return _REGION_COUNTS
+
+
+def pick_target():
+    """커버리지 우선: 글 수가 가장 적은 지역부터 뽑아 모든 지역을 고르게 채운다.
+
+    같은 최소 구간 안에서는 랜덤 (네이버 패턴 회피). 보드·longtail 은 그대로 랜덤.
+    counts 가 비면(조회 실패) 전부 0 동률 → 기존처럼 순수 랜덤.
+    """
+    targets = all_region_targets()
+    counts = _region_counts()
+    least = min(counts.get(r, 0) for r, _ in targets)
+    pool = [(r, t) for r, t in targets if counts.get(r, 0) == least]
+    region, region_type = random.choice(pool)
+    board_slug, board_title = random.choice(BOARDS)
+    longtail = random.choice(get_longtails(board_title))
+    return region, region_type, board_slug, board_title, longtail
+
+
+def build_og(slug: str, region: str, board_title: str) -> str:
+    """OG 이미지 URL 결정.
+
+    우선순위:
+      1) R2 키가 있으면 → 사진 합성(텍스트 오버레이) → R2에 업로드 → 그 URL
+      2) R2 합성 실패해도 → pick_photo_key 결과 (Worker가 직접 R2에서 서빙)
+      3) 그것도 실패하면 → /media/hero.jpg 최후 fallback
+
+    글 slug 결정적 → 같은 slug 재시도해도 같은 사진.
+    """
+    photo_key = pick_photo_key(slug)
+    fallback_url = f"/media/{photo_key}"   # Worker가 R2에서 직접 서빙 — R2 키 불필요
+
+    # R2 키 없거나 쓰기 권한 없으면 합성 스킵 — fallback URL로 충분
+    if not os.environ.get("R2_ACCESS_KEY_ID"):
+        return fallback_url
+
+    # 소스 사진 읽기 — R2 boto3 GetObject가 AccessDenied 나면 HTTPS public 으로 폴백.
+    # (R2 API 토큰이 write-only 일 때 read는 어차피 막힘. Worker /media/* 가 public.)
+    source_bytes: bytes | None = None
+    try:
+        source_bytes = get_object(photo_key)
+    except Exception as e:
+        print(f"[info] R2 GetObject failed, trying HTTPS public read: {e}", file=sys.stderr)
+        try:
+            import requests as _requests
+            site = os.environ.get("SITE_DOMAIN", "ajasky.co.kr")
+            r = _requests.get(f"https://{site}/media/{photo_key}", timeout=30)
+            r.raise_for_status()
+            source_bytes = r.content
+        except Exception as e2:
+            print(f"[warn] HTTPS source read also failed: {e2}", file=sys.stderr)
+            return fallback_url
+
+    try:
+        ribbon, head_main = _split_board(board_title)
+        composed = compose_for_site(
+            SITE_DOMAIN,
+            source_bytes,
+            ribbon=ribbon,                      # 항상 보드 카테고리. 지역명 fallback 금지.
+            headline_prefix=region_leaf(region), # 큰 글자 1줄 = 최말단 지명(동·읍·면/시군구)
+            headline_main=head_main,            # 큰 글자 2줄 = 메인 키워드
+        )
+    except Exception as e:
+        print(f"[warn] OG compose failed: {e}", file=sys.stderr)
+        return fallback_url
+
+    # 업로드: R2 boto3 PutObject 가 AccessDenied 라서 Worker /api/og-upload 경유.
+    # Worker는 MEDIA binding 으로 R2 full 권한이라 가능.
+    try:
+        token = os.environ.get("WORKER_API_TOKEN")
+        if not token:
+            print("[warn] WORKER_API_TOKEN missing, og upload skipped", file=sys.stderr)
+            return fallback_url
+        site = os.environ.get("SITE_DOMAIN", "ajasky.co.kr")
+        r = _requests.post(
+            f"https://{site}/api/og-upload",
+            params={"slug": slug},
+            data=composed,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "image/jpeg",
+            },
+            timeout=30,
+        )
+        r.raise_for_status()
+        hero_url = r.json()["url"]
+    except Exception as e:
+        print(f"[warn] og upload via worker failed: {e}", file=sys.stderr)
+        return fallback_url
+
+    # 본문 i=1, i=3, i=5 위치용 body 변형 3장 추가 생성 — 같은 텍스트, 다른 사진.
+    # post.tsx 가 /media/og/body{N}-{slug}.jpg 로 직접 참조하므로 이 URL 들이
+    # 존재해야 함. hero photo 와 중복 회피해서 4장 모두 다른 photo 사용.
+    try:
+        _build_body_og_variants(slug, region, board_title, hero_photo_n=_photo_n(photo_key))
+    except Exception as e:
+        # 본문 변형 실패는 치명적이지 않음 — hero 만 있으면 글은 정상 노출
+        print(f"[warn] body og variants build failed: {e}", file=sys.stderr)
+    return hero_url
+
+
+def _photo_n(photo_key: str) -> int:
+    """photo_key='photos/045.jpg' → 45."""
+    import re
+    m = re.search(r"(\d+)\.jpg$", photo_key)
+    return int(m.group(1)) if m else 0
+
+
+def _djb2(s: str) -> int:
+    h = 5381
+    for c in s.encode("utf-8"):
+        h = ((h << 5) + h + c) & 0xFFFFFFFF
+    return h
+
+
+def _build_body_og_variants(slug: str, region: str, board_title: str, hero_photo_n: int) -> None:
+    """본문 i=1, i=3, i=5 위치용 body1/body2/body3 변형 합성 + 업로드.
+
+    같은 글 안에서 hero+body1+body2+body3 = 4장 모두 다른 photo 가 되도록 회피.
+    """
+    POOL_SIZE = 121
+    used: set[int] = {hero_photo_n}
+    picked: list[int] = []
+    seed = 0
+    while len(picked) < 3 and seed < POOL_SIZE * 2:
+        n = (_djb2(f"{slug}#body{seed}") % POOL_SIZE) + 1
+        if n not in used:
+            used.add(n)
+            picked.append(n)
+        seed += 1
+    if len(picked) < 3:
+        return
+
+    token = os.environ["WORKER_API_TOKEN"]
+    site = os.environ.get("SITE_DOMAIN", "ajasky.co.kr")
+    ribbon, head_main = _split_board(board_title)
+
+    for i, photo_n in enumerate(picked, 1):
+        photo_key = f"photos/{photo_n:03d}.jpg"
+        try:
+            r = _requests.get(f"https://{site}/media/{photo_key}", timeout=30)
+            r.raise_for_status()
+            composed = compose_for_site(
+                site,
+                r.content,
+                ribbon=ribbon,
+                headline_prefix=region_leaf(region),
+                headline_main=head_main,
+            )
+            _requests.post(
+                f"https://{site}/api/og-upload",
+                params={"slug": slug, "variant": f"body{i}"},
+                data=composed,
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "image/jpeg",
+                },
+                timeout=30,
+            ).raise_for_status()
+        except Exception as e:
+            print(f"[warn] body{i} variant failed: {e}", file=sys.stderr)
+
+
+def build_payload(region: str, region_type: str, board_slug: str, board_title: str, longtail: str, generated: dict) -> dict:
+    title = generated["title"]
+    slug = slugify_ko(f"{region}-{board_title}-{longtail}")[:280]
+    og_url = build_og(slug, region, board_title)
+
+    # meta_keywords 는 Gemini 출력 무시하고 derive_keywords 로 통일.
+    # 사용자가 "관악구스카이차" / "관악구 스카이차" / "서울 관악구 스카이차" 등
+    # 어떻게 쳐도 매칭되도록 자동 변형 생성. 상한 22개(derive_keywords 내부).
+    # 참고: <meta name="keywords">는 SEO 가중치가 거의 없어 개수는 큰 영향 없음.
+    keywords = derive_keywords(region, board_title)
+    meta_keywords = ",".join(keywords)
+
+    return {
+        "site_domain": SITE_DOMAIN,
+        "board_slug": board_slug,
+        "slug": slug,
+        "title": title,
+        "region": region,
+        "region_type": region_type,
+        "meta_description": generated["meta_description"],
+        "meta_keywords": meta_keywords,
+        "body_md": generated["body_md"],
+        "toc_json": json.dumps(generated.get("toc", []), ensure_ascii=False),
+        "faq_json": json.dumps(generated.get("faq", []), ensure_ascii=False),
+        "og_image_url": og_url,
+    }
+
+
+def publish_one(idx: int = 0, max_retries: int = 5) -> bool:
+    """1건 실제 발행될 때까지 최대 N회 재시도.
+
+    중복(409) 발생 시 다른 (region, board, longtail) 조합으로 재시도.
+    Gemini 생성 전에 slug 만 먼저 만들어 DB에 있는지 확인 → 있으면 Gemini 호출 자체 스킵해 비용 절약.
+    """
+    for attempt in range(max_retries):
+        region, region_type, board_slug, board_title, longtail = pick_target()
+        slug_preview = slugify_ko(f"{region}-{board_title}-{longtail}")[:280]
+        print(f"[#{idx}.{attempt+1}] target region={region!r} board={board_title!r} slug={slug_preview!r}")
+
+        # 사전 중복 체크: 같은 slug 글이 이미 발행됐는지 HEAD 로 확인.
+        if _slug_exists(board_slug, slug_preview):
+            print(f"[#{idx}.{attempt+1}] slug already exists, retry with different combo")
+            continue
+
+        try:
+            generated = generate_post(region, board_title, longtail)
+        except Exception as e:
+            print(f"[#{idx}.{attempt+1}] generate failed: {e}", file=sys.stderr)
+            continue
+
+        payload = build_payload(region, region_type, board_slug, board_title, longtail, generated)
+        try:
+            result = publish(payload)
+        except Exception as e:
+            print(f"[#{idx}.{attempt+1}] publish failed: {e}", file=sys.stderr)
+            continue
+
+        if result is None:
+            # 사전 체크 통과했는데 그래도 409 (race condition 등) → 재시도
+            print(f"[#{idx}.{attempt+1}] dup at API, retrying")
+            continue
+
+        print(f"[#{idx}] published id={result.get('id')}")
+        # 로컬 카운트 증가 → 같은 run 안에서 같은 지역 재선택 방지, 커버리지 진행.
+        _region_counts()[region] = _region_counts().get(region, 0) + 1
+        return True
+
+    print(f"[#{idx}] all {max_retries} retries failed", file=sys.stderr)
+    return False
+
+
+def _slug_exists(board_slug: str, slug: str) -> bool:
+    """Worker post 페이지에 HEAD 요청해 200 이면 이미 존재."""
+    import requests
+    site = os.environ.get("SITE_DOMAIN", "ajasky.co.kr")
+    from urllib.parse import quote
+    url = f"https://{site}/{quote(board_slug)}/{quote(slug)}"
+    try:
+        r = requests.head(url, timeout=10, allow_redirects=False)
+        return r.status_code == 200
+    except requests.RequestException:
+        return False  # 통신 실패 시 일단 시도 (publish 단에서 409 처리됨)
+
+
+def main():
+    print(f"[run] start {datetime.now(timezone.utc).isoformat()}")
+
+    # 매 cron 트리거마다 N건 발행 (PUBLISH_BATCH_SIZE).
+    # 기본 1. 페이스 확장 시 2~3으로 올려 한 번에 여러 글 발행.
+    batch = int(os.environ.get("PUBLISH_BATCH_SIZE", "1"))
+
+    # 발행 확률 (시드 단계에서 변동 폭 줄이고 싶을 때 1.0; 시드 후엔 0.83~0.9).
+    p = float(os.environ.get("PUBLISH_PROBABILITY", "1.0"))
+    if random.random() > p:
+        print(f"[skip] random skip (probability={p})")
+        return
+
+    print(f"[run] batch size = {batch}")
+    success = 0
+    for i in range(batch):
+        if publish_one(i + 1):
+            success += 1
+        # 같은 cron run 안에서 Gemini API rate limit 회피 위해 약간 간격
+        if i < batch - 1:
+            time.sleep(random.uniform(15, 30))
+
+    print(f"[run] done {success}/{batch} OK")
+    if success == 0 and batch > 0:
+        sys.exit(2)
+
+
+if __name__ == "__main__":
+    main()

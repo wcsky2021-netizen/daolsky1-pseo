@@ -1,0 +1,28 @@
+name = "daolsky1-pseo"
+main = "src/index.ts"
+compatibility_date = "2026-05-01"
+compatibility_flags = ["nodejs_compat"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "daolsky1-pseo-db"
+# database_id 는 형님 새 Cloudflare 계정에서 `wrangler d1 create daolsky1-pseo-db`
+# 실행 후 출력 ID를 여기에 붙여넣는다. (기존 아자스카이 계정 것과 절대 공유 X)
+database_id = "TODO_RUN_wrangler_d1_create"
+
+[[r2_buckets]]
+binding = "MEDIA"
+bucket_name = "daolsky1-media"
+
+[vars]
+# WORKER_API_TOKEN_HASH 는 `wrangler secret put WORKER_API_TOKEN_HASH` 로 별도 등록 (커밋 X)
+# GITHUB_DISPATCH_TOKEN 도 동일 (`wrangler secret put GITHUB_DISPATCH_TOKEN`)
+
+# 누락분 자동 복구 cron — 매시간 정각 UTC
+[triggers]
+crons = ["0 * * * *"]
+
+# 도메인 라우팅 — Cloudflare에 daolsky1.co.kr 연결 후 주석 해제
+# routes = [
+#   { pattern = "daolsky1.co.kr/*", custom_domain = true },
+# ]
