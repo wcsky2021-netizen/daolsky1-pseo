@@ -1,8 +1,7 @@
 import type { Env } from '../types';
 
 const DAILY_TARGET = 50;   // 네이버 일일 색인 요청 한도 50과 맞춤
-// TODO: 형님 새 GitHub 저장소로 교체 (예: '형님계정/daolsky1-pseo'). 자동복구 cron 전용.
-const REPO = 'TODO_OWNER/daolsky1-pseo';
+const REPO = 'wcsky2021-netizen/daolsky1-pseo';
 const BRANCH = 'main';
 const MIN_GAP_TO_DISPATCH = 3;
 const MAX_BATCH = 10;
