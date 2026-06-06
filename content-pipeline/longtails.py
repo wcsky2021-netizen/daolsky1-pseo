@@ -485,10 +485,27 @@ LONGTAILS_BY_BOARD = {
 }
 
 
-# 작업종류 longtail 을 모든 보드 풀에 공통 추가 (보드당 30 → 30 + 약 80 = 약 110)
-# 1,785 동읍면 × 8 보드 × 110 longtail = 1.57M 페이지 풀.
+# 톤수 angle longtail — 검색광고 실측(1톤스카이차/3.5톤스카이차 등 검색량 확인) 반영.
+# 톤수별 차종 선택은 실제 검색되는 각도라 모든 보드에 공통 추가.
+TONNAGE_LONGTAILS = [
+    "1톤 스카이차로 가능한 작업 범위",
+    "3.5톤 스카이차 선택 기준",
+    "5톤 스카이차가 필요한 현장",
+    "톤수별 작업 높이 차이 이해",
+    "현장에 맞는 톤수 선택 포인트",
+    "저층 작업에 적합한 1톤 차종 판단",
+    "고층 작업을 위한 대형 톤수 선택",
+    "톤수 선택이 비용에 미치는 영향",
+    "협소 골목 진입과 톤수 선택",
+    "작업대 하중과 톤수 매칭 기준",
+    "1톤과 3.5톤 차종 비교 포인트",
+    "현장 여건별 적정 톤수 판단",
+]
+
+# 작업종류 + 톤수 longtail 을 모든 보드 풀에 공통 추가.
 for _board, _longtails in LONGTAILS_BY_BOARD.items():
     _longtails.extend(WORK_TYPE_LONGTAILS)
+    _longtails.extend(TONNAGE_LONGTAILS)
 
 
 # 보드별 고유 각도 추가 — 레퍼런스(safetyfirstskycar) 토픽을 우리 어휘로 변형.
