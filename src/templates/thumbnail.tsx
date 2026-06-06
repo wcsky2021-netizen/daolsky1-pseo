@@ -33,7 +33,7 @@ export function Thumbnail(props: ThumbnailProps) {
   return html`
     <div class="hero">
       <img src="${imageUrl}" alt="${alt}" loading="lazy">
-      <div class="side"><span class="vt">AJASKY</span></div>
+      <div class="side"><span class="vt">DAOLSKY</span></div>
       <span class="ribbon">${ribbon}</span>
       <div class="head">
         ${headlinePrefix ? html`${headlinePrefix}<br>` : ''}<span class="underline">${headlineHighlight}</span>

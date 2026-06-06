@@ -209,7 +209,7 @@ def _build_body_og_variants(slug: str, region: str, board_title: str, hero_photo
 
     같은 글 안에서 hero+body1+body2+body3 = 4장 모두 다른 photo 가 되도록 회피.
     """
-    POOL_SIZE = 121
+    POOL_SIZE = 237
     used: set[int] = {hero_photo_n}
     picked: list[int] = []
     seed = 0

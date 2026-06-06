@@ -3,15 +3,19 @@ main = "src/index.ts"
 compatibility_date = "2026-05-01"
 compatibility_flags = ["nodejs_compat"]
 
+# 도메인 라우팅 — daolsky1.co.kr Cloudflare 연결됨(active)
+routes = [
+  { pattern = "daolsky1.co.kr", custom_domain = true },
+  { pattern = "www.daolsky1.co.kr", custom_domain = true },
+]
+
 [[d1_databases]]
 binding = "DB"
 database_name = "daolsky1-pseo-db"
-# database_id 는 형님 새 Cloudflare 계정에서 `wrangler d1 create daolsky1-pseo-db`
-# 실행 후 출력 ID를 여기에 붙여넣는다. (기존 아자스카이 계정 것과 절대 공유 X)
 database_id = "fab2914c-1f24-4b16-ad94-83e0ba5f4e96"
 
 # R2: 대시보드에서 R2 활성화 후 `wrangler r2 bucket create daolsky1-media` 하고 주석 해제.
-# OG 이미지 저장용이라 사이트 렌더링엔 불필요 → 임시주소 배포 단계에선 꺼둠.
+# OG 이미지 저장용이라 사이트 렌더링엔 불필요.
 # [[r2_buckets]]
 # binding = "MEDIA"
 # bucket_name = "daolsky1-media"
@@ -23,8 +27,3 @@ database_id = "fab2914c-1f24-4b16-ad94-83e0ba5f4e96"
 # 누락분 자동 복구 cron — 매시간 정각 UTC
 [triggers]
 crons = ["0 * * * *"]
-
-# 도메인 라우팅 — Cloudflare에 daolsky1.co.kr 연결 후 주석 해제
-# routes = [
-#   { pattern = "daolsky1.co.kr/*", custom_domain = true },
-# ]

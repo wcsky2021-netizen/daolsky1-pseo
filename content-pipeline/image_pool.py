@@ -1,4 +1,4 @@
-"""본 이미지 121장 풀에서 글 slug 기반 결정적 선택.
+"""본 이미지 237장 풀에서 글 slug 기반 결정적 선택.
 
 같은 slug → 같은 이미지 (재시도/재발행에도 안정적).
 다른 slug → 분산 (해시 기반).
@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import hashlib
 
-POOL_SIZE = 121
+POOL_SIZE = 237  # 네이버_썸네일_1x1 폴더 전체 (photos/001.jpg ~ photos/237.jpg)
 
 
 def pick_photo_key(slug: str) -> str:
