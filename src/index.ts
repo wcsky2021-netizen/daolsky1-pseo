@@ -30,6 +30,15 @@ app.use('*', async (c, next) => {
   const rawHost = c.req.header('host') ?? '';
   const host = rawHost.split(':')[0].toLowerCase();
 
+  // www.도메인 → 메인 도메인으로 301 (sites 테이블엔 apex만 등록되어 있음)
+  if (host.startsWith('www.')) {
+    const url = new URL(c.req.url);
+    url.hostname = host.slice(4);
+    url.protocol = 'https:';
+    url.port = '';
+    return c.redirect(url.toString(), 301);
+  }
+
   let site = await c.env.DB.prepare('SELECT * FROM sites WHERE domain = ?')
     .bind(host)
     .first<Site>();
