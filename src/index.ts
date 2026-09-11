@@ -52,6 +52,8 @@ app.use('*', async (c, next) => {
   await next();
 
   // 사이트 전체 색인 차단 (소유자 동의) — HTML 외 응답(sitemap/rss/이미지)까지 커버
+  // 일부 응답은 headers 가 immutable 이라 clone 후 set (그냥 set 하면 TypeError)
+  c.res = new Response(c.res.body, c.res);
   c.res.headers.set('X-Robots-Tag', 'noindex, noarchive, nosnippet');
 });
 
