@@ -50,6 +50,9 @@ app.use('*', async (c, next) => {
   if (!site) return c.text(`Site not found: ${host}`, 404);
   c.set('site', site);
   await next();
+
+  // 사이트 전체 색인 차단 (소유자 동의) — HTML 외 응답(sitemap/rss/이미지)까지 커버
+  c.res.headers.set('X-Robots-Tag', 'noindex, noarchive, nosnippet');
 });
 
 app.get('/_health', (c) => c.json({ ok: true, ts: Date.now() }));

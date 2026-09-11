@@ -35,7 +35,5 @@ User-agent: *
 Allow: /
 Disallow: /api/
 Disallow: /_health
-
-Sitemap: https://${site.domain}/sitemap.xml
 `;
 }

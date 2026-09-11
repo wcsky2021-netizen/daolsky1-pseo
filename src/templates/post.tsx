@@ -188,6 +188,7 @@ export function PostPage(props: PostPageProps) {
     activeBoardSlug: board.slug,
     keywords: post.meta_keywords,
     jsonLd,
+    noindex: true,  // 글도 검색 노출 제외 — 사이트 전체 색인 차단 (소유자 동의)
     children: inner,
   });
 }
